@@ -29,7 +29,7 @@ import pandas as pd
 from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import train_test_split
-
+import joblib
 
 # Split the dataframe into test and train data
 def split_data(df):
@@ -73,6 +73,11 @@ def main():
 
     # Train the model
     model = train_model(data, ridge_args)
+
+    # Save the model to the outputs directory for capture
+    model_file_name = '../models/model.pkl'
+
+    joblib.dump(value=model, filename=model_file_name)
 
     # Log the metrics for the model
     metrics = get_model_metrics(model, data)
