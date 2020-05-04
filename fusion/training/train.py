@@ -75,7 +75,7 @@ def main():
     model = train_model(data, ridge_args)
 
     # Save the model to the outputs directory for capture
-    model_file_name = '../models/model.pkl'
+    model_file_name = '../models/diabetes.pkl'
 
     joblib.dump(value=model, filename=model_file_name)
 
