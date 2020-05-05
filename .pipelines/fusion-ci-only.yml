@@ -1,0 +1,30 @@
+# Continuous Integration (CI) pipeline that orchestrates the training, evaluation, registration, deployment, and testing of the fusion model.
+
+resources:
+  containers:
+  - container: mlops
+    image: mcr.microsoft.com/mlops/python:latest
+
+pr: none
+trigger:
+  branches:
+    include:
+    - master
+
+variables:
+- template: fusion-variables-template.yml
+- group: devopsforai-aml-vg
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+- stage: 'Model_CI'
+  displayName: 'Model CI'
+  jobs:
+  - job: "Model_CI_Pipeline"
+    displayName: "Model CI Pipeline"
+    container: mlops
+    timeoutInMinutes: 0
+    steps:
+    - template: code-quality-template.yml

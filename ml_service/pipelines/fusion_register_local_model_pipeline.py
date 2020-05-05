@@ -23,6 +23,7 @@ def main():
                            model_path="../../fusion/models/diabetes.pkl",
                            model_name="sklearn-diabetes",
                            tags={"area": "diabetes", "type": "regression"},
+                           version=3,
                            description="sklearn Ridge regression model to predict diabetes")
 
 

@@ -13,9 +13,7 @@ trigger:
   paths:
     include:
     - fusion/
-    - ml_service/pipelines/fusion_build_train_pipeline.py
-    - ml_service/pipelines/fusion_build_train_pipeline_with_r.py
-    - ml_service/pipelines/fusion_build_train_pipeline_with_r_on_dbricks.py
+    - ml_service/pipelines/fusion_register_local_model_pipeline.py
 
 variables:
 - template: fusion-variables-template.yml
@@ -35,27 +33,15 @@ stages:
     timeoutInMinutes: 0
     steps:
     - template: code-quality-template.yml
-    - task: AzureCLI@1
-      inputs:
-        azureSubscription: '$(WORKSPACE_SVC_CONNECTION)'
-        scriptLocation: inlineScript
-        workingDirectory: $(Build.SourcesDirectory)
-        inlineScript: |
-          set -e # fail on error
-          export SUBSCRIPTION_ID=$(az account show --query id -o tsv)
-          # Invoke the Python building and publishing a training pipeline
-          python -m ml_service.pipelines.fusion_build_train_pipeline
-      displayName: 'Publish Azure Machine Learning Pipeline'
 
-- stage: 'Trigger_AML_Pipeline'
-  displayName: 'Train model'
-  condition: and(succeeded(), not(variables['MODEL_BUILD_ID']))
-  variables:
-    BUILD_URI: '$(SYSTEM.COLLECTIONURI)$(SYSTEM.TEAMPROJECT)/_build/results?buildId=$(BUILD.BUILDID)'
+
+- stage: 'Register_Local_Model'
+  displayName: 'Register local model'
+  condition: and(succeeded())
   jobs:
-  - job: "Get_Pipeline_ID"
-    condition: and(succeeded(), eq(coalesce(variables['auto-trigger-training'], 'true'), 'true'))
-    displayName: "Get Pipeline ID for execution"
+  - job: "Model_Register_Pipeline"
+    condition: and(succeeded())
+    displayName: "Model Register Pipeline"
     container: mlops
     timeoutInMinutes: 0
     steps:
@@ -67,54 +53,28 @@ stages:
         inlineScript: |
           set -e # fail on error
           export SUBSCRIPTION_ID=$(az account show --query id -o tsv)
-          python -m ml_service.pipelines.run_train_pipeline --output_pipeline_id_file "pipeline_id.txt" --skip_train_execution
-          # Set AMLPIPELINEID variable for next AML Pipeline task in next job
-          AMLPIPELINEID="$(cat pipeline_id.txt)"
-          echo "##vso[task.setvariable variable=AMLPIPELINEID;isOutput=true]$AMLPIPELINEID"
-      name: 'getpipelineid'
-      displayName: 'Get Pipeline ID'
-  - job: "Run_ML_Pipeline"
-    dependsOn: "Get_Pipeline_ID"
-    displayName: "Trigger ML Training Pipeline"
-    timeoutInMinutes: 0
-    pool: server
-    variables:
-      AMLPIPELINE_ID: $[ dependencies.Get_Pipeline_ID.outputs['getpipelineid.AMLPIPELINEID'] ]
-    steps:
-    - task: ms-air-aiagility.vss-services-azureml.azureml-restApi-task.MLPublishedPipelineRestAPITask@0
-      displayName: 'Invoke ML pipeline'
-      inputs:
-        azureSubscription: '$(WORKSPACE_SVC_CONNECTION)'
-        PipelineId: '$(AMLPIPELINE_ID)'
-        ExperimentName: '$(EXPERIMENT_NAME)'
-        PipelineParameters: '"ParameterAssignments": {"model_name": "$(MODEL_NAME)"}, "tags": {"BuildId": "$(Build.BuildId)", "BuildUri": "$(BUILD_URI)"}, "StepTags": {"BuildId": "$(Build.BuildId)", "BuildUri": "$(BUILD_URI)"}'
-  - job: "Training_Run_Report"
-    dependsOn: "Run_ML_Pipeline"
-    condition: always()
-    displayName: "Determine if evaluation succeeded and new model is registered"
-    container: mlops
-    timeoutInMinutes: 0
-    steps:
-    - template: fusion-get-model-version-template.yml
+          python -m ml_service.pipelines.fusion_register_local_model_pipeline
+          echo "Model registered"
+      name: 'registermodel'
+      displayName: 'Regsiter Model'
 
 - stage: 'Deploy_ACI'
   displayName: 'Deploy to ACI'
   dependsOn: Trigger_AML_Pipeline
-  condition: and(or(succeeded(), variables['MODEL_BUILD_ID']), variables['ACI_DEPLOYMENT_NAME'])
+  condition: and(or(succeeded(), variables['ACI_DEPLOYMENT_NAME'])
   jobs:
   - job: "Deploy_ACI"
     displayName: "Deploy to ACI"
     container: mlops
     timeoutInMinutes: 0
     steps:
-    - template: fusion-get-model-version-template.yml
     - task: ms-air-aiagility.vss-services-azureml.azureml-model-deploy-task.AMLModelDeploy@0
       displayName: 'Azure ML Model Deploy'
       inputs:
         azureSubscription: $(WORKSPACE_SVC_CONNECTION)
         modelSourceType: manualSpec
         modelName: '$(MODEL_NAME)'
-        modelVersion: $(MODEL_VERSION)
+        modelVersion: 3
         inferencePath: '$(Build.SourcesDirectory)/$(SOURCES_DIR_TRAIN)/scoring/inference_config.yml'
         deploymentTarget: ACI
         deploymentName: $(ACI_DEPLOYMENT_NAME)
@@ -140,14 +100,13 @@ stages:
     container: mlops
     timeoutInMinutes: 0
     steps:
-    - template: fusion-get-model-version-template.yml
     - task: ms-air-aiagility.vss-services-azureml.azureml-model-deploy-task.AMLModelDeploy@0
       displayName: 'Azure ML Model Deploy'
       inputs:
         azureSubscription: $(WORKSPACE_SVC_CONNECTION)
         modelSourceType: manualSpec
         modelName: '$(MODEL_NAME)'
-        modelVersion: $(MODEL_VERSION)
+        modelVersion: 3
         inferencePath: '$(Build.SourcesDirectory)/$(SOURCES_DIR_TRAIN)/scoring/inference_config.yml'
         deploymentTarget: AKS
         aksCluster: $(AKS_COMPUTE_NAME)
